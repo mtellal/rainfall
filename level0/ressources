@@ -1,0 +1,6 @@
+=> Open binary with ghidra
+=> See that atoi is compared to 0x1a7 (423)
+-> ./level0 423
+=> Execute a shell and connected to level1
+-> whoami 
+-> level1
