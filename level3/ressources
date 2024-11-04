@@ -1,0 +1,9 @@
+
+-> value for %x %x %x %x %x %x
+200 b7fd1ac0 b7ff37d0 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 a207825
+
+-> exploit printf vulnerability: printf(arg)
+
+with arg %x/%p can read stack 
+and with \n (int *) can write on it 
+
