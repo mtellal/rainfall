@@ -1,0 +1,42 @@
+
+
+
+/****************************/
+/*	Ghidra decompiler   */
+/****************************/
+main:
+  undefined4 *puVar1;
+  void *pvVar2;
+  undefined4 *puVar3;
+  FILE *__stream;
+  
+  puVar1 = (undefined4 *)malloc(8);
+  *puVar1 = 1;
+  pvVar2 = malloc(8);
+  puVar1[1] = pvVar2;
+  puVar3 = (undefined4 *)malloc(8);
+  *puVar3 = 2;
+  pvVar2 = malloc(8);
+  puVar3[1] = pvVar2;
+  strcpy((char *)puVar1[1],*(char **)(param_2 + 4));
+  strcpy((char *)puVar3[1],*(char **)(param_2 + 8));
+  __stream = fopen("/home/user/level8/.pass","r");
+  fgets(c,0x44,__stream);
+  puts("~~");
+  return 0;
+
+
+/****************************/
+/*	    Infos	    */
+/****************************/
+
+
+- need 2 arguments
+- intentional segfault on puVar1[1]/puVar3[1]
+
+
+Strategy 
+=> exploit heap, how and to do what ?
+=> modify c variable, to fgets flag -> overwrite bss data ?
+=>
+
