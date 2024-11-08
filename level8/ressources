@@ -1,0 +1,55 @@
+
+
+/******************************/
+/*	   Ghidra	      */
+/******************************/
+
+-> input[5]
+-> print(auth, service)
+-> fgets(0x80, stdin) lit 128 char de stdin
+-> verif si input pas nul (bVar11)
+
+
+/**** A U T H ****/
+
+-> auth = malloc(4) = {0}
+-> set une var a 0xffffff
+-> set pcVar4 = local_8b -> valeur sur la stack buffer[2] (=> strcpy(auth, local_8b))
+
+-> DO WHILE cVar1 != '\0'
+-> with cVar1 = pcVar4 (local_8b=buffer[2])
+47: pcVar4 = auth + 1 
+...
+51: *pcVar4 = '\0'
+55: pcVar4 = local_8b -> addr sur la stack 
+-> lit sur la stack tant que un char '\0' n'a pas ete trouve, a partir de level8bc
+
+-> save cVar1 value uVar6 + uVar9 (used to free)
+-> verify that uVar6 < 0x1f (30)
+-> then strcpy(auth, local_8b) -> copy what is on the stack to auth
+
+
+
+/****  R E S E T ****/
+
+-> free auth if 
+
+/**** S E R V I C E  ****/
+
+->  
+
+
+
+
+/******************************/
+/*	   Infos 	      */
+/******************************/
+
+
+
+python -c 'print "A"*128' => print 2 addresses same time
+(nil, nil)
+
+
+
+
