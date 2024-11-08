@@ -25,19 +25,37 @@
 -> lit sur la stack tant que un char '\0' n'a pas ete trouve, a partir de level8bc
 
 -> save cVar1 value uVar6 + uVar9 (used to free)
--> verify that uVar6 < 0x1f (30)
+-> verify that uVar6 < 0x1f (30) and set uVar9 in boolean
 -> then strcpy(auth, local_8b) -> copy what is on the stack to auth
 
 
 
 /****  R E S E T ****/
 
--> free auth if 
+-> free auth IF ((!uVar9 && TRUE) == uVar9)
+-> always TRUE ?? 
 
 /**** S E R V I C E  ****/
 
-->  
+acStack_89 -> [a]rray [c]haracter [s]tack [89]padding to ebp
+-> uVar12 = (byte *)0xfffffff8 < input
+-> set uVar9 = acStack_89 === (char *)0x0 
+-> create service = strdup(acStack_89)  
 
+
+
+/**** L O G I N ****/
+
+-> IF (!uVar12 and !uVar9) == uVar12
+-> IF2 (auth + 0x20 == 0) -> return "Password"
+-> ELSE -> execute shell
+
+
+
+/**** G O A L ****/
+===================================================================== 
+====>  ((!uVar12 && !uVar9) == uVar12) AND (auth + 0x20 != 0))  <====
+===================================================================== 
 
 
 
@@ -45,11 +63,29 @@
 /*	   Infos 	      */
 /******************************/
 
-
-
 python -c 'print "A"*128' => print 2 addresses same time
 (nil, nil)
 
+/****** S T R A T E G Y *****/
+
+-> check stack overflow to overwrite main ret => F A I L 
 
 
+
+strcpy(auth, local_8b) => generate heap overflow ???
+
+-> get addres of auth 
+auth address in heap (first malloc): 0x0804a008
+
+-> get address of local_8b
+		address local_8b: 0xbffff6d5
+
+loop 1: 0x0804a008
+loop 2: 0x0804a018
+
+
+test with command login:
+"login"
+uVar12 = false
+uVar9 = true
 
