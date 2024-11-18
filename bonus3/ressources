@@ -1,0 +1,11 @@
+
+
+Observations: code should correctly work even with 0
+
+=> tried to overwrite values with local_98[iVar2] = '\0';
+-> FAIL: generate segfault but can't be exploitable
+
+code should work with 0 -> atoi return 0 on error or empty string
+=> empty string work
+
+./bonus3 ""
