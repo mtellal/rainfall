@@ -1,11 +1,8 @@
 
 
-Observations: code should correctly work even with 0
-
-=> tried to overwrite values with local_98[iVar2] = '\0';
--> FAIL: generate segfault but can't be exploitable
-
-code should work with 0 -> atoi return 0 on error or empty string
-=> empty string work
+=> We need to have strcmp(buffer, argv[1]) equal to execute the shell
+=> Atoi return a zero when a error occur or when we have a null string
+=> Try empty string 
+=> It works
 
 ./bonus3 ""

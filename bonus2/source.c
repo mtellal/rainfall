@@ -1,18 +1,28 @@
-/**********************/
-/*	Ghidra	      */
-/**********************/
 
 void	greetuser(int language) {
 
 	char buffer[64];
 
-	if (language == 1) 
-		strcpy(buffer, "Hyvää päivää ");	
-	else if (language == 2)
-		strcpy(buffer, "Goedemiddag! ");	
+	if (language == 1) {
+		buffer[0] = 'H';
+		buffer[1] = 'y';
+		buffer[2] = 'v';
+		buffer[3] = 'ä';
+		buffer[4] = 'ä';
+		strncpy(buffer + 5, "päivää ", 12);	
+	}
+	else if (language == 2) {
+		strcnpy(buffer, "Goed", 4);	
+		buffer[4] = 'e';	
+		buffer[5] = 'm';	
+		buffer[6] = 'i';	
+		buffer[7] = 'd';	
+		strcnpy(buffer + 8, "dag!", 4);	
+		buffer[12] = ' ';
+		buffer[13] = '\0';
+	}
 	else 
-		strcpy(buffer, "Hello");
-	// strcat(buffer, astack0x004);
+		strncpy(buffer, "Hello", 4);
 	puts(buffer);
 	return 0;
 }
@@ -36,7 +46,6 @@ int main(int argc, char **argv) {
 			else if (memcmp(lenv, "nl", 2) == 0)
 				language = 2;
 		}
-		// operations stacks
 		ret = greetuser(language);
 	}
 	else
