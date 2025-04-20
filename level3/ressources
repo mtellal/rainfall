@@ -9,7 +9,7 @@ level3: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), 
 ```
 **Permissions**: `-rwsr-s---+ 1 level4 users 5366 Mar  6  2016 level3`
 
-## Static analysis
+## Static Analysis
 
 After decompiling the binary with ghidra we get the pseudo code below: 
 

