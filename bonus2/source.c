@@ -9,7 +9,7 @@ void	greetuser(int language) {
 		buffer[2] = 'v';
 		buffer[3] = 'ä';
 		buffer[4] = 'ä';
-		strncpy(buffer + 5, "päivää ", 12);	
+		strncpy(buffer + 5, "päivää ", 11);	
 	}
 	else if (language == 2) {
 		strcnpy(buffer, "Goed", 4);	
